@@ -29,6 +29,7 @@ def animate_wave_1D_periodic(
     
     # set the plots
     vmin, vmax = -1.1*np.max(np.abs(u_tx[0])), 1.1*np.max(np.abs(u_tx[0]))
+    
     ax.set_xlim(0, L)
     ax.set_ylim(vmin, vmax)
     ax.set_xlabel("x")
@@ -42,7 +43,6 @@ def animate_wave_1D_periodic(
             line.set_ydata(u_tx[i])
         if u_ref is not None and show_err:
          line_err.set_ydata(np.abs(u_tx[i]-u_ref[i]))
-        # ax.scatter([0,L], [u_tx[0,0], u_tx[0,-1]], color='k', label='B.C.')
         ax.set_title(f"{title}, t={times[i]:.3f} s")
         return (line,)
 
@@ -68,7 +68,7 @@ def animate_wave_1D_periodic(
         return HTML(f'<img src="{save_path}">')
     else:
         from matplotlib import rc
-        rc('animation','jshtml')
+        rc('animation', html='jshtml')
         plt.close(fig)   # suppress extra static plot
         return anim
     
