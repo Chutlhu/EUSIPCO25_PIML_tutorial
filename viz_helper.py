@@ -72,3 +72,4 @@ def animate_wave_1D_periodic(
         plt.close(fig)   # suppress extra static plot
         return anim
     
+    
