@@ -935,6 +935,75 @@ class PINN_Wave1D_inverse(PINN_Wave1D):
         self.w_pde = loss_weights['pde']
         self.w_data = loss_weights['data']
         
+        
+    def train(self, tx_data, u_data, steps_adam=1500, lr=1e-3, log_every=100, plot_live=False):
+        """Train the PINN model"""
+        self.model.train()
+        opt = torch.optim.Adam(self.model.parameters(), lr=lr)
+        hist = []
+        
+        # Evaluation points for live plotting
+        if plot_live:
+            x_eval = torch.linspace(0, self.L, 400)[:, None]
+            t_eval = 0.35
+            tx_eval = torch.cat([torch.full_like(x_eval, t_eval), x_eval], dim=1).to(self.device)
+
+        for step in range(steps_adam):
+            
+            opt.zero_grad(set_to_none=True)
+
+            # (1) PDE loss
+            tx_c = self.sample_collocation(self.N_pde).requires_grad_(True)
+            u_c = self.model(tx_c)
+            ut_c, ux_c, utt_c, uxx_c = self.derivatives(u_c, tx_c)
+            r = utt_c - self.c**2 * uxx_c
+            L_pde = torch.mean(r**2)
+
+            # (4) Data / Supervised losses
+            u_d = self.model(tx_data)
+            L_data = torch.mean((u_d - u_data)**2)
+
+            # (6) total loss & step
+            loss = self.w_pde*L_pde + self.w_data*L_data
+            loss.backward()
+            opt.step()
+
+            if step % log_every == 0:
+                parts = {
+                    'pde': float(L_pde.detach().cpu()),
+                    'data': float(L_data.detach().cpu()),
+                }
+                hist.append((step, float(loss.detach().cpu()), parts))
+                print(f"[Adam {step:04d}] total={hist[-1][1]:.3e} parts={parts}")
+  
+                if plot_live:
+                    self._plot_live_training(hist, tx_eval, x_eval, t_eval, step=step, total_steps=steps_adam)
+
+        if plot_live:
+            self._plot_live_training(hist, tx_eval, x_eval, t_eval, step=step, total_steps=steps_adam)
+
+        return hist
+
+class PINN_Wave1D_identification(PINN_Wave1D):
+    def __init__(self, 
+        model_arch, 
+        wave_speed=1.0, wave_mode=1, domain_length=1.0, 
+        samples_sizes = {
+            'N_pde': 2048,
+        },
+        loss_weights = {
+            'pde' : 1., 
+            'data' : 1.,
+        },
+        device='cpu',
+    ):
+        super().__init__(model_arch, wave_speed, wave_mode, domain_length, samples_sizes, loss_weights, device)
+        # Make wave speed a learnable parameter
+        # self.c = torch.nn.Parameter(torch.tensor(wave_speed, dtype=torch.float32, device=device))
+        # print("Inverse problem: Wave speed 'c' is now a learnable parameter.")
+        self.w_pde = loss_weights['pde']
+        self.w_data = loss_weights['data']
+        
         self.c_hat = torch.tensor(0.1, device=device, dtype=torch.float32)
         self.c_hat = torch.nn.Parameter(self.c_hat, requires_grad=True)
         self.learning_c = True

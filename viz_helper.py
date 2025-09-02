@@ -32,7 +32,7 @@ def animate_wave_1D_periodic(
     
     ax.set_xlim(0, L)
     ax.set_ylim(vmin, vmax)
-    ax.set_xlabel("x")
+    ax.set_xlabel("x [m]")
     ax.set_ylabel("u(x,t)")
     ax.set_title(f"{title}, t=0.000 s")
     ax.legend(loc='upper right')
