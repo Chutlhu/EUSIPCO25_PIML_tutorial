@@ -15,7 +15,7 @@ def animate_wave_1D_periodic(
     u_ref=None, 
     show_err=False,
     save_path=None,
-    mode='js'
+    mode='js',
     ):
     
     fig, ax = plt.subplots(figsize=(7,3))
