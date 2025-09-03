@@ -288,7 +288,6 @@ class PINN_Wave1D(nn.Module):
         plt.tight_layout()
         plt.show()
                 
-
     def __call__(self, tx):
         return self.model(tx)
 
@@ -300,7 +299,6 @@ class PINN_Wave1D(nn.Module):
                 t = torch.full_like(x, t)
             tx = torch.cat([t.to(self.device), x.to(self.device)], dim=1)
             return self.model(tx)
-
 
 class PINN_Wave1D_withLBFGS(PINN_Wave1D):
     def __init__(self, 
@@ -467,7 +465,6 @@ class PINN_Wave1D_withLBFGS(PINN_Wave1D):
 
         return hist
 
-
 class PINN_Wave1D_AdaptiveLambdasKendall(PINN_Wave1D):
     def __init__(self, 
         model_arch, 
@@ -587,7 +584,6 @@ class PINN_Wave1D_AdaptiveLambdasKendall(PINN_Wave1D):
 
         return hist
     
-
 class PINN_Wave1D_AdaptiveLambdasMcClenny(PINN_Wave1D):
     def __init__(self, 
         model_arch, 
@@ -652,7 +648,7 @@ class PINN_Wave1D_AdaptiveLambdasMcClenny(PINN_Wave1D):
 
         for step in range(steps_adam):
             
-            if step % 200 == 0:
+            if step % 500 == 0:
                 # optional resample (then re-init weights)
                 tx_c = self.sample_collocation(self.N_pde).requires_grad_(True)
                 tx_i, u0, ut0 = self.sample_ic(self.N_ic)
@@ -732,6 +728,120 @@ class PINN_Wave1D_AdaptiveLambdasMcClenny(PINN_Wave1D):
 
         return hist
 
+class PINN_Wave1D_FreezeSampling(PINN_Wave1D):
+    def __init__(self, 
+        model_arch, 
+        wave_speed=1.0, wave_mode=1, domain_length=1.0, 
+        freezing_interval=500,
+        samples_sizes = {
+            'N_pde': 2048,
+            'N_ic' : 1024,
+            'N_bc' : 256
+        },
+        loss_weights = {
+            'pde' : 1., 
+            'ic' : 1., 
+            'bc' : 1.
+        },
+        device='cpu', 
+    ):
+        """
+        Initialize PINN for wave equation
+        
+        Args:
+            model_arch: PyTorch model class or instance
+            wave_speed: Wave propagation speed (c)
+            wave_mode: Wave mode number (k = mode * pi)
+            domain_length: Length of spatial domain
+            device: Computing device
+            N_c, N_i, N_b: Number of collocation, initial, boundary points
+        """
+        super().__init__(model_arch, wave_speed, wave_mode, domain_length, samples_sizes, loss_weights, device)
+        self.freezing_interval = freezing_interval
+        print(f"PINN initialized with {self.N_pde} PDE points, {self.N_ic*2} IC points, {self.N_bc*2} BC points")
+
+    def train(self, 
+            steps_adam=1500, 
+            lr=1e-3, lr_alpha=1e-3,
+            steps_lbfgs=0,
+            log_every=100, plot_live=False):
+        """Train the PINN model with SA-PINN approach"""
+        self.model.train()
+        
+        opt = torch.optim.Adam(self.model.parameters(), lr=lr)
+
+        hist = []
+        
+        # Evaluation points for live plotting
+        if plot_live:
+            Nx = 400
+            x_eval = torch.linspace(0, self.L, Nx)[:, None]
+            t_eval = 0.35
+            tx_eval = torch.cat([torch.full_like(x_eval, t_eval), x_eval], dim=1).to(self.device)
+
+        for step in range(steps_adam):
+            
+            if step % self.freezing_interval == 0:
+                # optional resample (then re-init weights)
+                tx_c = self.sample_collocation(self.N_pde).requires_grad_(True)
+                tx_i, u0, ut0 = self.sample_ic(self.N_ic)
+                tx_i.requires_grad_(True)
+                tx0, txL = self.sample_bc(self.N_bc)
+                tx0.requires_grad_(True)
+                txL.requires_grad_(True)
+
+            # Zero gradients
+            opt.zero_grad()
+
+            # (1) PDE residuals
+            u_c = self.model(tx_c)
+            ut_c, ux_c, utt_c, uxx_c = self.derivatives(u_c, tx_c)
+            res_pde = (utt_c - self.c**2 * uxx_c)  # Shape: [N_pde, 1]
+
+            # (2) IC residuals
+            tx_i = tx_i
+            u_i = self.model(tx_i)
+            ut_i, _, _, _ = self.derivatives(u_i, tx_i)
+            res_ic = torch.cat([(u_i - u0), (ut_i - ut0)], dim=0)  # Shape: [2*N_ic, 1]
+
+            # (3) BC residuals
+            u0b = self.model(tx0)
+            uLb = self.model(txL)
+            _, ux0, _, _ = self.derivatives(u0b, tx0)
+            _, uxL, _, _ = self.derivatives(uLb, txL)
+            res_bc = torch.cat([(u0b - uLb), (ux0 - uxL)], dim=0)  # Shape: [2*N_bc, 1]
+            
+            # (5) Weighted losses
+            L_pde = torch.mean(res_pde**2)
+            L_ic = torch.mean(res_ic**2)
+            L_bc = torch.mean(res_bc**2)
+            total_loss = self.w_pde * L_pde + self.w_ic * L_ic + self.w_bc * L_bc
+            
+            # (6) Backward pass
+            total_loss.backward()
+            
+            # (8) Update parameters
+            opt.step()  # Gradient descent on θ
+
+            if step % log_every == 0:
+                parts = {
+                    'pde': float(L_pde.detach().cpu()),
+                    'ic': float(L_ic.detach().cpu()),
+                    'bc': float(L_bc.detach().cpu())
+                }
+                hist.append((step, float(total_loss.detach().cpu()), parts))
+                print(f"[PINN {step:04d}] total={hist[-1][1]:.3e} parts={parts}")
+                
+                if plot_live:
+                    self._plot_live_training(hist, tx_eval, x_eval, t_eval, step=step, total_steps=steps_adam + steps_lbfgs, title_suffix='')
+
+        if plot_live:
+            self._plot_live_training(hist, tx_eval, x_eval, t_eval, 
+                                step=steps_adam + steps_lbfgs, 
+                                total_steps=steps_adam + steps_lbfgs, 
+                                title_suffix=' - PINN Training ended')
+
+        return hist
 
 class PINN_Wave1D_SamplingLatineHyperCube(PINN_Wave1D):
     def __init__(self, 
@@ -807,7 +917,6 @@ class PINN_Wave1D_SamplingLatineHyperCube(PINN_Wave1D):
         x0 = torch.zeros_like(t)
         xL = torch.full_like(t, self.L)
         return (torch.cat([t, x0], 1), torch.cat([t, xL], 1))
-    
     
 class PINN_Wave1D_SamplingRAD(PINN_Wave1D):
     def __init__(self, 
@@ -914,7 +1023,6 @@ class PINN_Wave1D_SamplingRAD(PINN_Wave1D):
                 
         return tx_c
     
-
 class PINN_Wave1D_inverse(PINN_Wave1D):
     def __init__(self, 
         model_arch, 
@@ -987,7 +1095,9 @@ class PINN_Wave1D_inverse(PINN_Wave1D):
 class PINN_Wave1D_identification(PINN_Wave1D):
     def __init__(self, 
         model_arch, 
-        wave_speed=1.0, wave_mode=1, domain_length=1.0, 
+        wave_speed=1.0, 
+        wave_mode=1,
+        domain_length=1.0, 
         samples_sizes = {
             'N_pde': 2048,
         },
@@ -1004,7 +1114,7 @@ class PINN_Wave1D_identification(PINN_Wave1D):
         self.w_pde = loss_weights['pde']
         self.w_data = loss_weights['data']
         
-        self.c_hat = torch.tensor(0.1, device=device, dtype=torch.float32)
+        self.c_hat = torch.tensor(0.5, device=device, dtype=torch.float32)
         self.c_hat = torch.nn.Parameter(self.c_hat, requires_grad=True)
         self.learning_c = True
         if self.learning_c:
@@ -1068,6 +1178,109 @@ class PINN_Wave1D_identification(PINN_Wave1D):
             self._plot_live_training(hist, tx_eval, x_eval, t_eval, step=step, total_steps=steps_adam, title_suffix=title_suffix)
 
         return hist
+
+class PINN_RIRs(PINN_Wave1D):
+    def __init__(self, 
+        model_arch, 
+        samples_sizes = {
+            'N_pde': 2048,
+        },
+        loss_weights = {
+            'pde' : 1., 
+            'data' : 1.,
+        },
+        device='cpu',
+    ):
+        super().__init__(model_arch, 1, 1, 1, samples_sizes, loss_weights, device)
+        self.w_pde = loss_weights['pde']
+        self.w_data = loss_weights['data']
+        
+    def sample_collocation(self, Nc):
+        """Sample collocation points in domain [0,1] x [0,L]"""
+        t = torch.rand(Nc, 1)
+        x = torch.rand(Nc, 1) * 2 - 1  # Uniform random in [-1, 1]
+        return torch.cat([t, x], dim=1).to(self.device)
+        
+    def train(self, tx_data, u_data, steps_adam=1500, lr=1e-3, log_every=100, plot_live=False, data_to_plot=None):
+        """Train the PINN model"""
+        self.model.train()
+        opt = torch.optim.Adam(self.model.parameters(), lr=lr)
+        hist = []
+        
+        # Evaluation points for live plotting
+        for step in range(steps_adam):
+            
+            opt.zero_grad(set_to_none=True)
+
+            # (1) PDE loss
+            tx_c = self.sample_collocation(self.N_pde).requires_grad_(True)
+            u_c = self.model(tx_c)
+            ut_c, ux_c, utt_c, uxx_c = self.derivatives(u_c, tx_c)
+            r = utt_c - self.c**2 * uxx_c
+            L_pde = torch.mean(r**2)
+
+            # (4) Data / Supervised losses
+            u_d = self.model(tx_data)
+            L_data = torch.mean((u_d - u_data)**2)
+
+            # (6) total loss & step
+            loss = self.w_pde*L_pde + self.w_data*L_data
+            loss.backward()
+            opt.step()
+
+            if step % log_every == 0:
+                parts = {
+                    'pde': float(L_pde.detach().cpu()),
+                    'data': float(L_data.detach().cpu()),
+                }
+                hist.append((step, float(loss.detach().cpu()), parts))
+                print(f"[Adam {step:04d}] total={hist[-1][1]:.3e} parts={parts}")
+  
+                if plot_live:
+                    self._plot_live_training(hist, data_to_plot, step, steps_adam)
+
+        if plot_live:
+            self._plot_live_training(hist, data_to_plot, step, steps_adam)
+            
+
+        return hist
+
+    def _plot_live_training(self, hist, data_to_plot, step, total_steps):
+        xt_to_plot = data_to_plot['tx']
+        u_ref = data_to_plot['u_ref']
+        with torch.no_grad():
+            u_pred = self.model(xt_to_plot).cpu().numpy().reshape(u_ref.shape)
+        
+        try:
+            from IPython.display import clear_output
+            clear_output(wait=True)
+        except ImportError:
+            pass  # Skip clearing output if IPython not available
+        
+        steps, totals, comps = zip(*hist)
+        pde = [c['pde'] for c in comps]
+        data = [c['data'] for c in comps] if 'data' in comps[0] else None
+        
+        fig, axarr = plt.subplots(1,3, figsize=(13,5))
+        axarr[0].imshow(u_ref, aspect='auto', cmap="seismic", vmax=1, vmin=-1)
+        axarr[0].set_xlabel('Channel index')
+        axarr[0].set_ylabel('Samples')
+        axarr[0].set_title('Reference')
+        axarr[1].imshow(u_pred , aspect='auto', cmap="seismic", vmax=1, vmin=-1)
+        axarr[1].set_xlabel('Channel index')
+        axarr[1].set_ylabel('Samples')
+        axarr[1].set_title('Prediction')
+        axarr[2].plot(steps, pde, label='PDE')
+        if data is not None:
+            axarr[2].plot(steps, data, label='Data')
+        axarr[2].set_xlim([0, total_steps])
+        axarr[2].set_title("Loss Components")
+        axarr[2].set_xlabel("Steps")
+        axarr[2].legend()
+        axarr[2].grid(True)
+        plt.suptitle(f"Step {step}/{total_steps}")
+        plt.show()
+        return
 
 
 # Plain MLP architecture
