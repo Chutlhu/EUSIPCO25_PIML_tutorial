@@ -22,7 +22,7 @@ def animate_wave_1D_periodic(
     n_time, n_space = u_tx.shape
     if u_ref is not None:
         (line_ref,) = ax.plot(x, u_ref[0], 'C0--', lw=2, label='Analytic')
-        (line,) = ax.plot(x, u_tx[0], 'C1', lw=2, label='Solution')
+        (line,) = ax.plot(x, u_tx[0], 'C1', lw=2, label='Predicted')
     if u_ref is not None and show_err:
         err = np.abs(u_tx[0]-u_ref[0])
         (line_err,) = ax.plot(x, err, 'k--', lw=1, label='Error')

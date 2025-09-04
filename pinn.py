@@ -255,8 +255,8 @@ class PINN_Wave1D(nn.Module):
         )
         
         fig, axarr = plt.subplots(1, 3, figsize=(12, 4))
-        axarr[0].plot(x_eval.squeeze(), u_ref.squeeze(), label='Analytical True', lw=2)
-        axarr[0].plot(x_eval.squeeze(), u_pred.squeeze(), '--', label='PINN', lw=2)
+        axarr[0].plot(x_eval.squeeze(), u_ref.squeeze(), '--', label='Analytical True', lw=2)
+        axarr[0].plot(x_eval.squeeze(), u_pred.squeeze(), label='PINN', lw=2)
         for r, record in enumerate(self.pred_hist[-5:]):
             axarr[0].plot(record['x'], record['pred'], 'k-', alpha=0.2, lw=2)
         axarr[0].legend()
