@@ -917,7 +917,7 @@ class PINN_Wave1D_SamplingLatineHyperCube(PINN_Wave1D):
         x0 = torch.zeros_like(t)
         xL = torch.full_like(t, self.L)
         return (torch.cat([t, x0], 1), torch.cat([t, xL], 1))
-    
+
 class PINN_Wave1D_SamplingRAD(PINN_Wave1D):
     def __init__(self, 
         model_arch, 
