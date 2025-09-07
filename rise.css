@@ -20,3 +20,25 @@ body.rise-enabled td {
 body.rise-enabled th {
   font-size: 150%;
 }
+
+
+/* /* Fixed logo at the top-right, all slides */
+.reveal #deck-logo{
+  position: fixed;
+  top: 12px; right: 12px;
+  width: 96px; height: 96px;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 9999;        /* above slide content */
+  opacity: .98;
+}
+
+/* Optional: smaller on small screens */
+@media (max-width: 1000px){
+  .reveal #deck-logo{ width: 72px; height: 72px; }
+}
+
+/* Optional: hide in print/PDF */
+@media print{
+  .reveal #deck-logo{ display: none; }
+} */
