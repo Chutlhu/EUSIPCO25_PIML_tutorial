@@ -10,12 +10,6 @@ Mirco PEZZOLI$^1$, Diego DI CARLO$^2$, Shoichi KOYAMA$^3$
 
 ---
 
-## Open notebook in colab
-
-Open the Notebook in colab <a target="_blank" href="https://colab.research.google.com/github/https://colab.research.google.com/drive/1t13W2olpyrFJS7IJ7FPhsBFG7gxG_sWn?usp=sharing">
-  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
-</a>
-
 ## 📌 About
 
 This repository hosts the material for the **EUSIPCO 2025 tutorial on Physics-Informed Machine Learning (PIML) for Audio Processing**.  
